@@ -1,0 +1,3 @@
+[submodule "illustration2vec"]
+	path = illustration2vec
+	url = https://github.com/moeoverflow/illustration2vec.git

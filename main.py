@@ -15,19 +15,17 @@ logger = logging.getLogger()
 
 IMAGES_PATH = config['images_path']
 
-
 logger.info('Loading chainer models...')
 illust2vec = i2v.make_i2v_with_chainer(
     "./illustration2vec/illust2vec_tag_ver200.caffemodel", "./illustration2vec/tag_list.json")
 logger.info('Load completed.')
-
 
 logger.info('Connect to database.')
 client = MongoClient("localhost", 27017)
 db = client.animeloop_tags
 
 
-def to_tags(db, filename, loopid):
+def to_tags(filename, loopid):
     image = Image.open(filename)
     result = illust2vec.estimate_plausible_tags([image], threshold=0.5)[0]
 
@@ -36,6 +34,15 @@ def to_tags(db, filename, loopid):
         'source': 'illustration2vec',
         'lang': 'en'
     }
+
+    # Extract tags from database to memory.
+    saved_tags = list(db.tags.find({'loopid': ObjectId(loopid)}))
+
+    def exist_in_tagslist(loopid, type, value):
+        for t in saved_tags:
+            if str(t['loopid']) == loopid and t['type'] == type and t['value'] == value:
+                return True
+        return False
 
     for key in result.keys():
         for item in result[key]:
@@ -46,12 +53,14 @@ def to_tags(db, filename, loopid):
                 tag['type'] = key
             tag['value'] = item[0]
             tag['confidence'] = item[1]
-            check = db.tags.find_one({'loopid': ObjectId(loopid), 'type': tag['type'], 'value': tag['value']})
-            if check is None:
+
+            if not exist_in_tagslist(loopid, tag['type'], tag['value']):
                 db.tags.insert_one(tag)
 
     db.tagscheck.insert_one({'loopid': ObjectId(loopid)})
 
+
+saved_tagscheck = map(lambda tc: str(tc['loopid']), list(db.tagscheck.find({})))
 
 logger.info('Loading files list...')
 files = os.listdir(IMAGES_PATH)
@@ -62,6 +71,5 @@ for file in progress_bar:
         filename = IMAGES_PATH + '/' + file
         loopid = os.path.splitext(file)[0]
 
-        check = db.tagscheck.find_one({'loopid': ObjectId(loopid)})
-        if check is None:
-            to_tags(db, filename, loopid)
+        if loopid not in saved_tagscheck:
+            to_tags(filename, loopid)
